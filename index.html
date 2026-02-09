@@ -255,7 +255,7 @@
                         <div class="settings-section">
                             <h4><i class="fas fa-cloud"></i> Cloud Sync</h4>
                             <div class="setting-item">
-                                <p>Sync your data with GitHub Gist for backup and access across devices.</p>
+                                <p>Sync your tasks data with GitHub Gist for backup and access across devices.</p>
                                 <div class="input-group">
                                     <input type="password" id="githubToken" placeholder="GitHub Personal Token">
                                     <button class="info-btn" title="How to get token?">
@@ -270,10 +270,10 @@
                                 </div>
                                 <div class="button-group">
                                     <button id="syncToGist" class="action-btn primary">
-                                        <i class="fab fa-github"></i> Sync to Gist
+                                        <i class="fab fa-github"></i> Sync Tasks to Gist
                                     </button>
                                     <button id="importFromGist" class="action-btn secondary">
-                                        <i class="fas fa-download"></i> Import from Gist
+                                        <i class="fas fa-download"></i> Import Tasks from Gist
                                     </button>
                                 </div>
                             </div>
@@ -347,7 +347,8 @@
     <input type="file" id="fileImport" accept=".json" style="display: none;">
     
     <!-- Scripts -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.js"></script>
-    <script src="script.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.js"></script>
+<script src="events-data.js"></script>
+<script src="script.js"></script>
 </body>
 </html>
