@@ -298,6 +298,19 @@ body {
     z-index: 2;
 }
 
+.calendar-day.has-static-event::after {
+    content: '';
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 8px;
+    height: 8px;
+    background-color: #9b59b6;
+    border-radius: 50%;
+    z-index: 2;
+}
+
 .calendar-day.has-task::after {
     content: '';
     position: absolute;
@@ -469,6 +482,11 @@ body {
     position: relative;
 }
 
+.event-item.static-event {
+    border-left-color: #9b59b6;
+    background: linear-gradient(135deg, #f5f0f8 0%, #ffffff 100%);
+}
+
 .event-item:hover {
     transform: translateY(-3px);
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
@@ -527,6 +545,17 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+.static-event-label {
+    display: inline-block;
+    padding: 3px 8px;
+    background: #9b59b6;
+    color: white;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-left: 10px;
 }
 
 .delete-event-btn {
