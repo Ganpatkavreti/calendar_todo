@@ -1,3 +1,5 @@
+// script.js
+
 // Toastr Configuration
 toastr.options = {
     "closeButton": true,
@@ -93,7 +95,7 @@ const STORAGE_KEYS = {
     GIST_INFO: 'smartCalendar_gist_info_v3'
 };
 
-// Data Manager
+// Data Manager (without static events - they're in EventManager)
 class DataManager {
     constructor() {
         this.events = this.loadData(STORAGE_KEYS.EVENTS) || {};
@@ -137,9 +139,6 @@ class DataManager {
     }
 
     initializeSampleEvents() {
-        const currentYear = today.getFullYear();
-        const currentMonth = today.getMonth();
-        
         const dateKey = this.formatDate(today);
         
         if (!this.events[dateKey]) {
@@ -225,7 +224,7 @@ class DataManager {
         return this.reports[dateKey] || null;
     }
 
-    // Events Management
+    // User Events Management
     addEvent(eventData) {
         const dateKey = eventData.date;
         if (!this.events[dateKey]) {
@@ -261,6 +260,12 @@ class DataManager {
         return false;
     }
 
+    getUserEventsForDate(date) {
+        const dateKey = this.formatDate(date);
+        return this.events[dateKey] || [];
+    }
+
+    // Get all events for a month (user + static)
     getAllEventsForMonth(month, year) {
         const result = [];
         const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -269,20 +274,42 @@ class DataManager {
             const date = new Date(year, month, day);
             const dateKey = this.formatDate(date);
             
+            // User events
             if (this.events[dateKey]) {
                 this.events[dateKey].forEach(event => {
                     result.push({
                         date: dateKey,
-                        data: event
+                        data: { ...event, isStatic: false }
                     });
                 });
             }
+            
+            // Static events (from EventManager)
+            const staticEvents = eventManager.getStaticEventsForDate(date);
+            staticEvents.forEach(event => {
+                result.push({
+                    date: dateKey,
+                    data: event
+                });
+            });
         }
         
         return result;
     }
 
-    // Export/Import
+    // Export only tasks data for GitHub sync
+    exportTasksData() {
+        return {
+            dailyTasks: this.dailyTasks,
+            taskCompletions: this.taskCompletions,
+            reports: this.reports,
+            exportedAt: new Date().toISOString(),
+            version: '3.0',
+            type: 'tasks-only'
+        };
+    }
+
+    // Export all data for local backup
     exportAllData() {
         return {
             events: this.events,
@@ -292,11 +319,17 @@ class DataManager {
             settings: this.settings,
             gistInfo: this.gistInfo,
             exportedAt: new Date().toISOString(),
-            version: '3.0'
+            version: '3.0',
+            type: 'full-backup'
         };
     }
 
+    // Import all data from local backup
     importData(data) {
+        if (data.version !== '3.0') {
+            throw new Error('Invalid backup file. Please use backup from version 3.0');
+        }
+        
         if (data.events) this.events = data.events;
         if (data.dailyTasks) this.dailyTasks = data.dailyTasks;
         if (data.taskCompletions) this.taskCompletions = data.taskCompletions;
@@ -318,12 +351,12 @@ class DataManager {
         this.saveAll();
     }
 
-    // GitHub Gist Sync
-    async syncToGitHubGist(token, gistId = null) {
+    // GitHub Gist Sync - Only for tasks
+    async syncTasksToGitHubGist(token, gistId = null) {
         try {
-            const data = this.exportAllData();
-            const filename = 'daily-planner-data.json';
-            const content = JSON.stringify(data, null, 2);
+            const tasksData = this.exportTasksData();
+            const filename = 'daily-planner-tasks.json';
+            const content = JSON.stringify(tasksData, null, 2);
             
             const gistData = {
                 files: {
@@ -331,7 +364,7 @@ class DataManager {
                         content: content
                     }
                 },
-                description: `Daily Planner Data - ${new Date().toLocaleDateString()}`,
+                description: `Daily Planner Tasks - ${new Date().toLocaleDateString()}`,
                 public: false
             };
             
@@ -375,7 +408,7 @@ class DataManager {
         }
     }
 
-    async importFromGitHubGist(token, gistId) {
+    async importTasksFromGitHubGist(token, gistId) {
         try {
             const response = await fetch(`https://api.github.com/gists/${gistId}`, {
                 headers: {
@@ -396,11 +429,17 @@ class DataManager {
                 const file = files[0];
                 const data = JSON.parse(file.content);
                 
-                if (data.version !== '3.0') {
-                    throw new Error('Invalid data format. Please use data exported from version 3.0');
+                if (data.type !== 'tasks-only') {
+                    throw new Error('Invalid data format. This Gist does not contain tasks data.');
                 }
                 
-                this.importData(data);
+                if (data.dailyTasks) this.dailyTasks = data.dailyTasks;
+                if (data.taskCompletions) this.taskCompletions = data.taskCompletions;
+                if (data.reports) this.reports = data.reports;
+                
+                this.saveData(STORAGE_KEYS.DAILY_TASKS, this.dailyTasks);
+                this.saveData(STORAGE_KEYS.TASK_COMPLETIONS, this.taskCompletions);
+                this.saveData(STORAGE_KEYS.REPORTS, this.reports);
                 
                 this.gistInfo = {
                     id: gist.id,
@@ -450,6 +489,7 @@ function renderCalendar() {
     const totalDays = lastDay.getDate();
     
     let firstDayIndex = firstDay.getDay();
+    // Convert Sunday (0) to 6, Monday (1) to 0, etc.
     firstDayIndex = firstDayIndex === 0 ? 6 : firstDayIndex - 1;
     
     const prevMonthLastDay = new Date(currentYear, currentDate.getMonth(), 0).getDate();
@@ -488,14 +528,17 @@ function renderCalendar() {
             }
             
             // Check if it's today
-            const isToday = !isOtherMonth && 
-                           dayDate.getDate() === today.getDate() && 
+            const isToday = dayDate.getDate() === today.getDate() && 
                            dayDate.getMonth() === today.getMonth() && 
                            dayDate.getFullYear() === today.getFullYear();
             
-            // Check if it has events
+            // Check if it has user events
             const dateKey = dataManager.formatDate(dayDate);
-            const hasEvent = dataManager.events[dateKey] && dataManager.events[dateKey].length > 0;
+            const hasUserEvent = dataManager.events[dateKey] && dataManager.events[dateKey].length > 0;
+            
+            // Check if it has static events
+            const staticEvents = eventManager.getStaticEventsForDate(dayDate);
+            const hasStaticEvent = staticEvents.length > 0;
             
             // Check if it has tasks (only for today)
             const hasTask = isToday && dataManager.dailyTasks.length > 0;
@@ -504,8 +547,12 @@ function renderCalendar() {
                 dayElement.classList.add('today');
             }
             
-            if (hasEvent) {
+            if (hasUserEvent) {
                 dayElement.classList.add('has-event');
+            }
+            
+            if (hasStaticEvent) {
+                dayElement.classList.add('has-static-event');
             }
             
             if (hasTask) {
@@ -525,7 +572,8 @@ function renderCalendar() {
         
         calendarGrid.appendChild(weekRow);
         
-        if (currentDay >= totalDays && week > 3) {
+        // Break early if we've shown all days
+        if (currentDay >= totalDays) {
             break;
         }
     }
@@ -576,26 +624,35 @@ function showAllEventsForMonth() {
             groupedByDate[dateKey].forEach(item => {
                 const event = item.data;
                 const eventItem = document.createElement('div');
-                eventItem.className = 'event-item';
-                eventItem.innerHTML = `
-                    <div class="event-icon ${event.type.toLowerCase()}">${event.type}</div>
-                    <div class="event-details">
-                        <div class="event-title">${event.title}</div>
-                        <div class="event-time">
-                            <i class="far fa-clock"></i> ${event.time}
-                        </div>
-                    </div>
+                eventItem.className = `event-item ${event.isStatic ? 'static-event' : ''}`;
+                
+                const deleteButton = event.isStatic ? '' : `
                     <button class="delete-event-btn" data-date="${dateKey}" data-event-id="${event.id}">
                         <i class="fas fa-trash"></i>
                     </button>
                 `;
                 
-                // Add delete event listener
-                const deleteBtn = eventItem.querySelector('.delete-event-btn');
-                deleteBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    deleteEvent(dateKey, event.id);
-                });
+                const staticLabel = event.isStatic ? '<span class="static-event-label">Static</span>' : '';
+                
+                eventItem.innerHTML = `
+                    <div class="event-icon ${event.type.toLowerCase()}">${event.type}</div>
+                    <div class="event-details">
+                        <div class="event-title">${event.title} ${staticLabel}</div>
+                        <div class="event-time">
+                            <i class="far fa-clock"></i> ${event.time}
+                        </div>
+                    </div>
+                    ${deleteButton}
+                `;
+                
+                // Add delete event listener only for user events
+                if (!event.isStatic) {
+                    const deleteBtn = eventItem.querySelector('.delete-event-btn');
+                    deleteBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        deleteEvent(dateKey, event.id);
+                    });
+                }
                 
                 eventsList.appendChild(eventItem);
             });
@@ -605,7 +662,7 @@ function showAllEventsForMonth() {
     showEventsSection();
 }
 
-// Delete event function
+// Delete event function (only for user events)
 function deleteEvent(dateKey, eventId) {
     if (confirm('Are you sure you want to delete this event?')) {
         const success = dataManager.deleteEvent(dateKey, eventId);
@@ -1045,7 +1102,7 @@ function updateSyncStatus() {
     } else {
         statusText.textContent = '❌ Not connected to GitHub';
         statusText.style.color = '#e74c3c';
-        lastSync.textContent = 'Click "Sync to Gist" to backup your data';
+        lastSync.textContent = 'Click "Sync to Gist" to backup your tasks';
         lastSync.style.color = '#7f8c8d';
     }
 }
@@ -1062,8 +1119,8 @@ function hideGitHubInfoModal() {
     modalOverlay.classList.remove('active');
 }
 
-// Sync to GitHub Gist
-async function syncToGitHub() {
+// Sync tasks to GitHub Gist
+async function syncTasksToGitHub() {
     const token = githubToken.value.trim();
     const gistIdValue = gistId.value.trim();
     
@@ -1078,13 +1135,13 @@ async function syncToGitHub() {
     }
     
     try {
-        statusText.textContent = 'Syncing with GitHub...';
+        statusText.textContent = 'Syncing tasks with GitHub...';
         statusText.style.color = '#3498db';
         
-        await dataManager.syncToGitHubGist(token, gistIdValue || null);
+        await dataManager.syncTasksToGitHubGist(token, gistIdValue || null);
         
         updateSyncStatus();
-        toastr.success('Data synced to GitHub Gist successfully!');
+        toastr.success('Tasks synced to GitHub Gist successfully!');
         
     } catch (error) {
         statusText.textContent = 'Sync failed';
@@ -1093,8 +1150,8 @@ async function syncToGitHub() {
     }
 }
 
-// Import from GitHub Gist
-async function importFromGitHub() {
+// Import tasks from GitHub Gist
+async function importTasksFromGitHub() {
     const token = githubToken.value.trim();
     const gistIdValue = gistId.value.trim();
     
@@ -1114,14 +1171,14 @@ async function importFromGitHub() {
     }
     
     try {
-        statusText.textContent = 'Importing from GitHub...';
+        statusText.textContent = 'Importing tasks from GitHub...';
         statusText.style.color = '#3498db';
         
-        await dataManager.importFromGitHubGist(token, gistIdValue);
+        await dataManager.importTasksFromGitHubGist(token, gistIdValue);
         
         updateSyncStatus();
         renderCalendar();
-        toastr.success('Data imported from GitHub Gist successfully!');
+        toastr.success('Tasks imported from GitHub Gist successfully!');
         
     } catch (error) {
         statusText.textContent = 'Import failed';
@@ -1341,8 +1398,8 @@ function setupEventListeners() {
     closeInfoModal.addEventListener('click', hideGitHubInfoModal);
     
     // GitHub sync buttons
-    syncToGist.addEventListener('click', syncToGitHub);
-    importFromGist.addEventListener('click', importFromGitHub);
+    syncToGist.addEventListener('click', syncTasksToGitHub);
+    importFromGist.addEventListener('click', importTasksFromGitHub);
     
     // Data management buttons
     exportData.addEventListener('click', exportDataToFile);
